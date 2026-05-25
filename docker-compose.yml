@@ -1,0 +1,88 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+    env_file:
+      - .env.example
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    ports:
+      - "8000:8000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./apps/worker
+    env_file:
+      - .env.example
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      SELENIUM_REMOTE_URL: http://selenium-hub:4444/wd/hub
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      selenium-hub:
+        condition: service_healthy
+      chrome:
+        condition: service_started
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  selenium-hub:
+    image: selenium/hub:4.23.1
+    environment:
+      SE_SESSION_REQUEST_TIMEOUT: 60
+      SE_SESSION_RETRY_INTERVAL: 2
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bin/check-grid.sh --host 0.0.0.0 --port 4444"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  chrome:
+    image: selenium/node-chrome:4.23.1
+    shm_size: 2gb
+    environment:
+      SE_EVENT_BUS_HOST: selenium-hub
+      SE_EVENT_BUS_PUBLISH_PORT: 4442
+      SE_EVENT_BUS_SUBSCRIBE_PORT: 4443
+      SE_NODE_MAX_SESSIONS: 1
+      SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+    depends_on:
+      selenium-hub:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  rabbitmq-data:
