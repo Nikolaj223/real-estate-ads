@@ -1,0 +1,13 @@
+{
+  "name": "homeoffer-real-estate-assignment",
+  "private": true,
+  "workspaces": [
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev:frontend": "bun run --cwd apps/frontend dev --host 127.0.0.1",
+    "build:frontend": "bun run --cwd apps/frontend build",
+    "test:frontend": "bun run --cwd apps/frontend test",
+    "lint:frontend": "bun run --cwd apps/frontend lint"
+  }
+}
