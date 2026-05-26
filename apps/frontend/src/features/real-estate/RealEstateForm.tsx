@@ -27,8 +27,8 @@ export function RealEstateForm() {
   return (
     <section className="listing-workspace" aria-labelledby="listing-title">
       <div className="listing-workspace__header">
-        <p className="eyebrow">HomeOffer internal tools</p>
-        <h1 id="listing-title">Новое объявление о недвижимости</h1>
+        <p className="eyebrow">🏠 HomeOffer Pro</p>
+        <h1 id="listing-title">Создание объявления о недвижимости</h1>
       </div>
 
       <Formik<RealEstateFormValues>
@@ -45,8 +45,8 @@ export function RealEstateForm() {
             <Form className="listing-form" noValidate>
               <div className="form-section">
                 <div className="form-section__title">
-                  <h2>Объект</h2>
-                  <span>Основные поля объявления</span>
+                  <h2>📍 Объект</h2>
+                  <span>Основные данные</span>
                 </div>
                 <div className="form-grid">
                   <FormikTextInput name="name" label="Название объекта" placeholder="Например, 2-комнатная квартира" />
@@ -62,8 +62,8 @@ export function RealEstateForm() {
 
               <div className="form-section">
                 <div className="form-section__title">
-                  <h2>Параметры дома</h2>
-                  <span>Этажность и площадь</span>
+                  <h2>📐 Параметры дома</h2>
+                  <span>Размеры и этажность</span>
                 </div>
                 <div className="form-grid form-grid--numbers">
                   <FormikNumberInput name="floor" label="Этаж" min={-1} placeholder="-1" />
@@ -76,15 +76,15 @@ export function RealEstateForm() {
 
               <div className="listing-form__actions">
                 <button className="primary-button" type="submit" disabled={isSubmitting || !isValid || !dirty}>
-                  Сохранить объявление
+                  {isSubmitting ? "Обработка..." : "Опубликовать объявление"}
                 </button>
               </div>
             </Form>
 
             <aside className="payload-preview" aria-label="Payload объявления">
               <div>
-                <p className="eyebrow">Payload</p>
-                <h2>Данные формы</h2>
+                <p className="eyebrow">📋 JSON Preview</p>
+                <h2>Данные объявления</h2>
               </div>
               <pre>{previewValues}</pre>
             </aside>
