@@ -60,12 +60,15 @@ Yup.number().moreThanSumOfFields(["livingSquare", "kitchenSquare"])
 1. API принимает только `http/https` URL на домене `avito.ru` или его поддоменах.
 2. API строит стабильный `jobId` из URL и `Idempotency-Key`, если заголовок передан.
 3. Задача публикуется в RabbitMQ как persistent message.
-4. Worker вручную ack/nack-ает сообщение после Selenium-рендера.
+4. Worker повторно проверяет URL до браузинга и после redirect в Selenium.
 5. HTML страницы пишется в `docker compose logs worker`.
 
 ## Защиты и production-детали
 
-- SSRF guard: запрещены non-HTTP схемы, credentials в URL и любые host вне `*.avito.ru`.
+- SSRF guard: запрещены non-HTTP схемы, credentials в URL, нестандартные порты, любые host вне `*.avito.ru`, а также DNS-резолв в private/link-local/loopback адреса.
+- Redirect guard: worker включает Chrome CDP-блокировку явных private/local URL-паттернов, проверяет итоговый URL после Selenium-навигации и nack-ает задачу, если страница увела за пределы Avito.
+- Rate limiting: публичный `/browse` ограничен по IP через `BROWSE_RATE_LIMIT_PER_MINUTE`.
+- Secret hygiene: вне `local/test` API падает при запуске, если `IDEMPOTENCY_SALT` оставлен дефолтным; API и worker также запрещают RabbitMQ `guest:guest` вне local/test.
 - Idempotency: повторный URL или повторный `Idempotency-Key` возвращает `duplicate` без повторной публикации.
 - RabbitMQ: durable exchange/queue, persistent messages, dead-letter exchange/queue.
 - Worker: повторная проверка URL перед Selenium, manual ack/nack, page-load timeout, ожидание Selenium Grid, chunked HTML logs.
@@ -73,7 +76,9 @@ Yup.number().moreThanSumOfFields(["livingSquare", "kitchenSquare"])
 - Compose: наружу открыт только порт `8000` публичного API; RabbitMQ и Selenium доступны только внутри сети compose.
 - Healthchecks: RabbitMQ, Selenium Hub и FastAPI readiness.
 
-Для горизонтального production-масштабирования in-memory идемпотентность нужно заменить на Redis/PostgreSQL с уникальным ключом `job_id`; интерфейс сервиса уже изолирован.
+Webhooks в задании не требуются: сервис должен принять задачу, положить её в RabbitMQ и вывести HTML в logs. Если добавлять callback/webhook позже, нужен отдельный allowlist callback-доменов, HMAC-подпись, timeout/retry/backoff и audit log.
+
+Для горизонтального production-масштабирования in-memory rate limit и идемпотентность нужно заменить на Redis/PostgreSQL с уникальным ключом `job_id`; интерфейсы сервисов уже изолированы.
 
 ## Локальный запуск
 

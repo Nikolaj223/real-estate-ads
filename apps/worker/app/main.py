@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import socket
 import sys
 import time
 from datetime import datetime
+from collections.abc import Iterable
 from typing import Iterator
 from urllib.parse import urlparse
 from urllib.request import urlopen
@@ -19,8 +22,58 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 logger = logging.getLogger("browse_worker")
 
+PRIVATE_URL_PATTERNS = [
+    "http://localhost/*",
+    "https://localhost/*",
+    "http://127.*",
+    "https://127.*",
+    "http://0.*",
+    "https://0.*",
+    "http://10.*",
+    "https://10.*",
+    "http://169.254.*",
+    "https://169.254.*",
+    "http://172.16.*",
+    "https://172.16.*",
+    "http://172.17.*",
+    "https://172.17.*",
+    "http://172.18.*",
+    "https://172.18.*",
+    "http://172.19.*",
+    "https://172.19.*",
+    "http://172.20.*",
+    "https://172.20.*",
+    "http://172.21.*",
+    "https://172.21.*",
+    "http://172.22.*",
+    "https://172.22.*",
+    "http://172.23.*",
+    "https://172.23.*",
+    "http://172.24.*",
+    "https://172.24.*",
+    "http://172.25.*",
+    "https://172.25.*",
+    "http://172.26.*",
+    "https://172.26.*",
+    "http://172.27.*",
+    "https://172.27.*",
+    "http://172.28.*",
+    "https://172.28.*",
+    "http://172.29.*",
+    "https://172.29.*",
+    "http://172.30.*",
+    "https://172.30.*",
+    "http://172.31.*",
+    "https://172.31.*",
+    "http://192.168.*",
+    "https://192.168.*",
+    "http://[::1]/*",
+    "https://[::1]/*",
+]
+
 
 class Settings(BaseSettings):
+    environment: str = "local"
     log_level: str = "INFO"
     rabbitmq_url: str = "amqp://guest:guest@rabbitmq:5672/"
     rabbitmq_exchange: str = "homeoffer.browse"
@@ -29,6 +82,7 @@ class Settings(BaseSettings):
     rabbitmq_routing_key: str = "browse"
     rabbitmq_prefetch: int = 1
     allowed_browse_host_suffix: str = "avito.ru"
+    resolve_browse_dns: bool = True
 
     selenium_remote_url: str = "http://selenium-hub:4444/wd/hub"
     selenium_wait_timeout_seconds: int = 20
@@ -39,6 +93,14 @@ class Settings(BaseSettings):
     requeue_on_failure: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    def model_post_init(self, __context: object) -> None:
+        if self.environment.lower() in {"local", "test"}:
+            return
+
+        rabbitmq_url = urlparse(self.rabbitmq_url)
+        if rabbitmq_url.username == "guest" and rabbitmq_url.password == "guest":
+            raise ValueError("RABBITMQ_URL must not use guest:guest credentials outside local/test")
 
 
 class BrowseJob(BaseModel):
@@ -68,19 +130,71 @@ def selenium_status_url(remote_url: str) -> str:
     return f"{base_url}/status"
 
 
-def assert_allowed_browse_url(url: str, allowed_host_suffix: str) -> None:
-    parsed_url = urlparse(url)
+def resolve_addresses(host: str, port: int) -> set[str]:
+    addresses: set[str] = set()
+    for result in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM):
+        addresses.add(result[4][0])
+    return addresses
+
+
+def is_public_ip_address(address: str) -> bool:
+    try:
+        ip_address = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+
+    return not (
+        ip_address.is_loopback
+        or ip_address.is_private
+        or ip_address.is_link_local
+        or ip_address.is_multicast
+        or ip_address.is_reserved
+        or ip_address.is_unspecified
+    )
+
+
+def assert_allowed_browse_url(url: str, allowed_host_suffix: str, *, resolve_dns: bool = False) -> None:
+    try:
+        parsed_url = urlparse(url)
+        port = parsed_url.port
+    except ValueError as error:
+        raise BrowseUrlRejected("invalid URL") from error
+
     if parsed_url.scheme not in {"http", "https"}:
         raise BrowseUrlRejected("unsupported URL scheme")
     if parsed_url.username or parsed_url.password:
         raise BrowseUrlRejected("URL credentials are not allowed")
     if not parsed_url.hostname:
         raise BrowseUrlRejected("URL host is required")
+    if port and port not in {80, 443}:
+        raise BrowseUrlRejected("only default http/https ports are allowed")
 
     host = parsed_url.hostname.rstrip(".").lower()
     allowed_suffix = allowed_host_suffix.lower().lstrip(".")
     if host != allowed_suffix and not host.endswith(f".{allowed_suffix}"):
         raise BrowseUrlRejected("only Avito URLs are allowed")
+
+    if resolve_dns:
+        effective_port = port or (443 if parsed_url.scheme == "https" else 80)
+        try:
+            resolved_addresses: Iterable[str] = resolve_addresses(host, effective_port)
+        except OSError as error:
+            raise BrowseUrlRejected("URL host cannot be resolved") from error
+
+        resolved_addresses = set(resolved_addresses)
+        if not resolved_addresses:
+            raise BrowseUrlRejected("URL host cannot be resolved")
+
+        if any(not is_public_ip_address(address) for address in resolved_addresses):
+            raise BrowseUrlRejected("URL host resolves to a non-public address")
+
+
+def configure_network_guards(driver: webdriver.Remote) -> None:
+    try:
+        driver.execute_cdp_cmd("Network.enable", {})
+        driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": PRIVATE_URL_PATTERNS})
+    except Exception as error:
+        raise BrowseUrlRejected(f"failed to configure browser network guard: {error}") from error
 
 
 def wait_for_selenium(settings: Settings) -> None:
@@ -127,11 +241,17 @@ def render_and_log_html(job: BrowseJob, settings: Settings) -> None:
     driver: webdriver.Remote | None = None
     try:
         driver = build_driver(settings)
+        configure_network_guards(driver)
         logger.info("browse.started job_id=%s url=%s", job.job_id, job.url)
         driver.get(job.url)
         WebDriverWait(driver, settings.selenium_wait_timeout_seconds).until(
             lambda current_driver: current_driver.execute_script("return document.readyState")
             in {"interactive", "complete"},
+        )
+        assert_allowed_browse_url(
+            driver.current_url,
+            settings.allowed_browse_host_suffix,
+            resolve_dns=settings.resolve_browse_dns,
         )
         html = driver.page_source
         logger.info("browse.html.begin job_id=%s url=%s bytes=%s", job.job_id, job.url, len(html.encode("utf-8")))
@@ -180,7 +300,11 @@ def consume(settings: Settings) -> None:
     ) -> None:
         try:
             job = BrowseJob.model_validate_json(body)
-            assert_allowed_browse_url(job.url, settings.allowed_browse_host_suffix)
+            assert_allowed_browse_url(
+                job.url,
+                settings.allowed_browse_host_suffix,
+                resolve_dns=settings.resolve_browse_dns,
+            )
             render_and_log_html(job, settings)
         except ValidationError as error:
             logger.exception("browse.invalid_message delivery_tag=%s error=%s", method.delivery_tag, error)

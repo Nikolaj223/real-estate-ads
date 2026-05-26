@@ -6,6 +6,7 @@ from app.api.browse import router as browse_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.services.idempotency import InMemoryIdempotencyStore
+from app.services.rate_limiter import InMemoryRateLimiter
 from app.services.rabbitmq import RabbitPublisher
 
 
@@ -16,6 +17,7 @@ async def lifespan(app: FastAPI):
 
     app.state.settings = settings
     app.state.idempotency_store = InMemoryIdempotencyStore(settings.idempotency_ttl_seconds)
+    app.state.rate_limiter = InMemoryRateLimiter(settings.browse_rate_limit_per_minute)
     app.state.publisher = RabbitPublisher(settings)
     await app.state.publisher.connect()
 

@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.core.url_policy import BrowseUrlRejected, assert_allowed_browse_url
 from app.schemas.browse import BrowseAccepted, BrowseJob, BrowseRequest
 from app.services.idempotency import InMemoryIdempotencyStore, build_job_id
+from app.services.rate_limiter import InMemoryRateLimiter
 from app.services.rabbitmq import RabbitPublisher
 
 router = APIRouter()
@@ -24,17 +25,34 @@ def get_idempotency_store(request: Request) -> InMemoryIdempotencyStore:
     return request.app.state.idempotency_store
 
 
+def get_rate_limiter(request: Request) -> InMemoryRateLimiter:
+    return request.app.state.rate_limiter
+
+
+def get_client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/browse", response_model=BrowseAccepted, status_code=status.HTTP_202_ACCEPTED)
 async def browse(
     payload: BrowseRequest,
+    request: Request,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     settings: Settings = Depends(get_request_settings),
     publisher: RabbitPublisher = Depends(get_publisher),
     idempotency_store: InMemoryIdempotencyStore = Depends(get_idempotency_store),
+    rate_limiter: InMemoryRateLimiter = Depends(get_rate_limiter),
 ) -> BrowseAccepted:
+    if not rate_limiter.allow(get_client_key(request)):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
+
     url = str(payload.url)
     try:
-        assert_allowed_browse_url(url, settings.allowed_browse_host_suffix)
+        assert_allowed_browse_url(
+            url,
+            settings.allowed_browse_host_suffix,
+            resolve_dns=settings.resolve_browse_dns,
+        )
     except BrowseUrlRejected as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
@@ -56,7 +74,7 @@ async def browse(
         idempotency_store.forget(job_id)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Очередь временно недоступна",
+            detail="Queue is temporarily unavailable",
         ) from error
 
     return BrowseAccepted(jobId=job_id, status="queued", deduplicated=False)
