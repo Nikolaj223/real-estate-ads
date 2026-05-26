@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
 class BrowseRequest(BaseModel):
@@ -16,9 +16,8 @@ class BrowseJob(BaseModel):
 
 
 class BrowseAccepted(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     job_id: str = Field(alias="jobId")
     status: Literal["queued", "duplicate"]
     deduplicated: bool
-
-    class Config:
-        populate_by_name = True

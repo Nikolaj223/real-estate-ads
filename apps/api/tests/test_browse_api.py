@@ -7,10 +7,15 @@ from app.services.idempotency import InMemoryIdempotencyStore
 
 
 class FakePublisher:
+    should_fail = False
+
     def __init__(self) -> None:
         self.jobs: list[BrowseJob] = []
 
     async def publish_browse(self, job: BrowseJob) -> None:
+        if self.should_fail:
+            raise RuntimeError("RabbitMQ is unavailable")
+
         self.jobs.append(job)
 
     def is_ready(self) -> bool:
@@ -50,6 +55,38 @@ def test_browse_deduplicates_same_url() -> None:
     assert second_response.json()["status"] == "duplicate"
     assert second_response.json()["deduplicated"] is True
     assert first_response.json()["jobId"] == second_response.json()["jobId"]
+    assert len(publisher.jobs) == 1
+
+
+def test_browse_deduplicates_same_idempotency_key() -> None:
+    client, publisher = build_client()
+    payload = {"url": "https://www.avito.ru/samara/kvartiry/123"}
+    headers = {"Idempotency-Key": "listing-scan-123"}
+
+    first_response = client.post("/browse", json=payload, headers=headers)
+    second_response = client.post("/browse", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert second_response.json()["status"] == "duplicate"
+    assert second_response.json()["deduplicated"] is True
+    assert first_response.json()["jobId"] == second_response.json()["jobId"]
+    assert len(publisher.jobs) == 1
+
+
+def test_browse_releases_idempotency_reservation_when_publish_fails() -> None:
+    client, publisher = build_client()
+    payload = {"url": "https://www.avito.ru/samara/kvartiry/123"}
+    publisher.should_fail = True
+
+    failed_response = client.post("/browse", json=payload)
+
+    publisher.should_fail = False
+    retry_response = client.post("/browse", json=payload)
+
+    assert failed_response.status_code == 503
+    assert retry_response.status_code == 202
+    assert retry_response.json()["status"] == "queued"
     assert len(publisher.jobs) == 1
 
 
