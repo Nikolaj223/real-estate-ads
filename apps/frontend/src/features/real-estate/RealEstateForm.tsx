@@ -10,12 +10,21 @@ import { realEstateSchema } from "../../shared/validation/realEstateSchema";
 import { initialRealEstateValues, type RealEstateFormValues } from "./types";
 
 const dealTypeOptions = [
-  { label: "Продажа", value: "sale", description: "Объявление для прямой продажи объекта" },
-  { label: "Аренда", value: "rent", description: "Объявление для долгосрочной аренды" },
+  {
+    label: "Продажа",
+    value: "sale",
+    description: "Объявление для прямой продажи объекта",
+  },
+  {
+    label: "Аренда",
+    value: "rent",
+    description: "Объявление для долгосрочной аренды",
+  },
 ] as const;
 
 export function RealEstateForm() {
-  const [submittedValues, setSubmittedValues] = useState<RealEstateFormValues | null>(null);
+  const [submittedValues, setSubmittedValues] =
+    useState<RealEstateFormValues | null>(null);
   const previewValues = useMemo(() => {
     if (!submittedValues) {
       return "После отправки здесь появится нормализованный payload объявления.";
@@ -49,9 +58,21 @@ export function RealEstateForm() {
                   <span>Основные данные</span>
                 </div>
                 <div className="form-grid">
-                  <FormikTextInput name="name" label="Название объекта" placeholder="Например, 2-комнатная квартира" />
-                  <FormikTextInput name="address" label="Адрес" placeholder="Город, улица, дом" />
-                  <FormikRadioGroup name="dealType" label="Тип сделки" options={dealTypeOptions} />
+                  <FormikTextInput
+                    name="name"
+                    label="Название объекта"
+                    placeholder="Например, 2-комнатная квартира"
+                  />
+                  <FormikTextInput
+                    name="address"
+                    label="Адрес"
+                    placeholder="Город, улица, дом"
+                  />
+                  <FormikRadioGroup
+                    name="dealType"
+                    label="Тип сделки"
+                    options={dealTypeOptions}
+                  />
                   <FormikCheckbox
                     name="isStudio"
                     label="Студия"
@@ -66,16 +87,43 @@ export function RealEstateForm() {
                   <span>Размеры и этажность</span>
                 </div>
                 <div className="form-grid form-grid--numbers">
-                  <FormikNumberInput name="floor" label="Этаж" min={-1} placeholder="-1" />
-                  <FormikNumberInput name="totalFloors" label="Количество этажей в доме" min={-3} max={200} />
-                  <FormikNumberInput name="square" label="Площадь" min={0} max={400} />
-                  <FormikNumberInput name="livingSquare" label="Жилая площадь" min={0} />
-                  <FormikNumberInput name="kitchenSquare" label="Площадь кухни" min={0} />
+                  <FormikNumberInput
+                    name="floor"
+                    label="Этаж"
+                    min={-1}
+                    placeholder="-1"
+                  />
+                  <FormikNumberInput
+                    name="totalFloors"
+                    label="Количество этажей в доме"
+                    min={-3}
+                    max={200}
+                  />
+                  <FormikNumberInput
+                    name="square"
+                    label="Площадь"
+                    min={0}
+                    max={400}
+                  />
+                  <FormikNumberInput
+                    name="livingSquare"
+                    label="Жилая площадь"
+                    min={0}
+                  />
+                  <FormikNumberInput
+                    name="kitchenSquare"
+                    label="Площадь кухни"
+                    min={0}
+                  />
                 </div>
               </div>
 
               <div className="listing-form__actions">
-                <button className="primary-button" type="submit" disabled={isSubmitting || !isValid || !dirty}>
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={isSubmitting || !isValid || !dirty}
+                >
                   {isSubmitting ? "Обработка..." : "Опубликовать объявление"}
                 </button>
               </div>
