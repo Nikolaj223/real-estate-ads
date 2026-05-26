@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: frontend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    autoDeploy: true
+    dockerfile: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: VITE_API_URL
+        value: https://real-estate-api-1.onrender.com
